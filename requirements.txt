@@ -1,6 +1,6 @@
-discord.py==2.3.2
-python-dotenv
 discord.py
+aiohttp
+python-dotenv
 flask
 pytz
 asyncpg
