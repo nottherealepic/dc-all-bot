@@ -20,9 +20,9 @@ async def run_bot(path):
 # ----------- Main async function to run all bots -----------
 async def main():
     await asyncio.gather(
-        run_bot("bot1.py"),
-        run_bot("bot2.py"),
-        run_bot("bot3.py")
+        run_bot("nottherealepic.py"),
+        run_bot("giveawaybot.py"),
+        run_bot("pinger.py")
     )
 
 # ----------- Start Flask in a separate thread -----------
