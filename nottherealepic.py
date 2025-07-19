@@ -5,7 +5,6 @@ import random
 import logging
 import re
 import unicodedata
-from flask import Flask, send_from_directory
 from collections import defaultdict
 from discord import app_commands, Interaction
 from datetime import datetime, timedelta
@@ -14,7 +13,7 @@ from threading import Thread
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, Embed
-from flask import Flask
+
 
 # Your imported data modules (make sure these are correct)
 from files import files_data
@@ -755,24 +754,11 @@ async def on_member_remove(member):
     # Cleanup
     user_activity.pop(member.id, None)
 
-# ----------- Flask App for Uptime -----------
 
-app = Flask("")
-
-@app.route("/")
-def home():
-    return send_from_directory("static", "bot_status.html")
-def run_flask():
-    app.run(host="0.0.0.0", port=8080)
 
 # ----------- Main Entrypoint -----------
 
 if __name__ == "__main__":
-    # Start flask in a separate thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
     # Run the bot
     TOKEN = os.getenv("asmr")  # Or replace with your token string here
     if not TOKEN:
