@@ -32,7 +32,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Render URLs with display names
 RENDER_BOTS = {
-    "EGO BOT": "https://ego-c9gi.onrender.com/",
+    "3 IN ONE": "https://dc-all-bot.onrender.com",
     "NOTTHEREALEPIC": "https://notepicbot.onrender.com",
     "RENDER TEST": "https://render-test-ush9.onrender.com",
     "NIIMMAI": "https://pinger-xiz2.onrender.com",
