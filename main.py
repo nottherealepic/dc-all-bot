@@ -1,8 +1,9 @@
-import asyncio
-from flask import Flask, send_from_directory
+import subprocess
 import threading
+import time
+from flask import Flask, send_from_directory
 
-# ----------- Flask App for Uptime -----------
+# ----------- Flask App ----------- #
 app = Flask("")
 
 @app.route("/")
@@ -12,22 +13,20 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
 
-# ----------- Async function to run each bot file -----------
-async def run_bot(path):
-    proc = await asyncio.create_subprocess_exec('python3', path)
-    await proc.wait()
+# ----------- Run Bots as Subprocesses ----------- #
+def run_bot(file):
+    subprocess.Popen(["python3", file])
 
-# ----------- Main async function to run all bots -----------
-async def main():
-    await asyncio.gather(
-        run_bot("nottherealepic.py"),
-        run_bot("giveawaybot.py"),
-        run_bot("pinger.py")
-    )
+# ----------- Main ----------- #
+if __name__ == "__main__":
+    # Start Flask in a thread
+    threading.Thread(target=run_flask).start()
 
-# ----------- Start Flask in a separate thread -----------
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.start()
+    # Start each bot in a subprocess/thread
+    threading.Thread(target=run_bot, args=("nottherealepic.py",)).start()
+    threading.Thread(target=run_bot, args=("giveawaybot.py",)).start()
+    threading.Thread(target=run_bot, args=("pinger.py",)).start()
 
-# ----------- Start the bots -----------
-asyncio.run(main())
+    # 🛡️ Keep main thread alive forever
+    while True:
+        time.sleep(60)
