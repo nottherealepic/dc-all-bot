@@ -34,7 +34,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 RENDER_BOTS = {
     "3 IN ONE": "https://dc-all-bot.onrender.com",
     "NOTTHEREALEPIC": "https://notepicbot.onrender.com",
-    "RENDER TEST": "https://render-test-ush9.onrender.com",
+    "AANI": "https://aani-pp.onrender.com",
     "NIIMMAI": "https://pinger-xiz2.onrender.com",
     "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com"
 }
