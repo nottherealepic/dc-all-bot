@@ -4,3 +4,4 @@ python-dotenv
 flask
 pytz
 asyncpg
+python-telegram-bot==20.6
