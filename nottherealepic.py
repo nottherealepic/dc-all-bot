@@ -159,6 +159,7 @@ LEGIT_REACTION_CHANNEL_ID = 1233843778754838679  # Channel where embed will be s
 LEGIT_REACTION_ROLE_ID = 1232213167480901713  # Role to give on reaction
 LEGIT_REACTION_EMOJI = "✅"  # Emoji to react with
 LEGIT_REACTION_GIF_URL = "https://cdn.discordapp.com/attachments/1233831270866227271/1404083666791039079/nre_animated_low_mb.gif?ex=6899e650&is=689894d0&hm=d6cab030fec1bb426d9dc396f13efafacee9bac8dd60ecaee76f4301a2ca97ab&"  # Your GIF link
+LEGIT_REACTION_MESSAGE_ID = 1404085986098413640  # Existing message ID to edit
 # ---------------
 
 # ----------- Discord Bot Setup -----------
@@ -698,40 +699,51 @@ async def on_ready():
         logging.error(f"Error syncing commands: {e}")
     change_status.start()
     update_uptime_embed.start()
-    channel = bot.get_channel(LEGIT_REACTION_CHANNEL_ID)
-    if channel:
-        embed = discord.Embed(
-            title="🎭 Legit Role Access",
-            description=f"React with {LEGIT_REACTION_EMOJI} to get the **Legit** role.\n\n> Press the icon below to join!",
-            color=discord.Color.pink()
-        )
-        embed.set_image(url=LEGIT_REACTION_GIF_URL)
-        msg = await channel.send(embed=embed)
-        await msg.add_reaction(LEGIT_REACTION_EMOJI)
-        print(f"📌 Reaction role message sent in #{channel.name} (ID: {msg.id})")
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        print("❌ Channel not found.")
+        return
 
+    try:
+        msg = await channel.fetch_message(MESSAGE_ID)
+
+        embed = discord.Embed(
+            title="🎯 Get Verified Access",
+            description=f"React with {EMOJI} to get the **Legit** role.\nOnce given, your role will stay forever.",
+            color=discord.Color.red()
+        )
+        embed.set_image(url=GIF_URL)
+        embed.set_footer(text="Server Security • Auto-Verification", icon_url=bot.user.display_avatar.url)
+
+        await msg.edit(embed=embed)  # Edit instead of sending new
+        await msg.clear_reactions()
+        await msg.add_reaction(EMOJI)
+
+        print(f"📌 Updated existing reaction role message (ID: {MESSAGE_ID})")
+
+    except discord.NotFound:
+        print("❌ Message not found. Check MESSAGE_ID.")
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.channel_id == LEGIT_REACTION_CHANNEL_ID and str(payload.emoji) == LEGIT_REACTION_EMOJI and not payload.member.bot:
+    if payload.channel_id == CHANNEL_ID and payload.message_id == MESSAGE_ID and str(payload.emoji) == EMOJI and not payload.member.bot:
         guild = bot.get_guild(payload.guild_id)
-        role = guild.get_role(LEGIT_REACTION_ROLE_ID)
+        role = guild.get_role(ROLE_ID)
         member = payload.member
         channel = guild.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
 
-        if role and member:
-            if role not in member.roles:  # Give role only once
-                await member.add_roles(role)
-                try:
-                    await member.send(f"✅ You now have the **{role.name}** role! (One-time)")
-                except discord.Forbidden:
-                    pass
-        
-        # Remove their reaction so count stays at 1
+        if role and member and role not in member.roles:
+            await member.add_roles(role)
+            try:
+                await member.send(f"✅ You have been verified with the **{role.name}** role.")
+            except discord.Forbidden:
+                pass
+
+        # Remove reaction to keep count at 1
         await message.remove_reaction(payload.emoji, member)
 
-# ❌ No reaction remove event — role stays forever once given
+# No removal event → role stays forever
 
 
 @tasks.loop(seconds=30)  
