@@ -699,36 +699,36 @@ async def on_ready():
         logging.error(f"Error syncing commands: {e}")
     change_status.start()
     update_uptime_embed.start()
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(LEGIT_REACTION_CHANNEL_ID)
     if not channel:
         print("❌ Channel not found.")
         return
 
     try:
-        msg = await channel.fetch_message(MESSAGE_ID)
+        msg = await channel.fetch_message(LEGIT_REACTION_MESSAGE_ID)
 
         embed = discord.Embed(
             title="🎯 Get Verified Access",
-            description=f"React with {EMOJI} to get the **Legit** role.\nOnce given, your role will stay forever.",
+            description=f"React with {LEGIT_REACTION_EMOJI} to get the **Legit** role.\nOnce given, your role will stay forever.",
             color=discord.Color.red()
         )
-        embed.set_image(url=GIF_URL)
+        embed.set_image(url=LEGIT_REACTION_GIF_URL)
         embed.set_footer(text="Server Security • Auto-Verification", icon_url=bot.user.display_avatar.url)
 
         await msg.edit(embed=embed)  # Edit instead of sending new
         await msg.clear_reactions()
-        await msg.add_reaction(EMOJI)
+        await msg.add_reaction(LEGIT_REACTION_EMOJI)
 
-        print(f"📌 Updated existing reaction role message (ID: {MESSAGE_ID})")
+        print(f"📌 Updated existing reaction role message (ID: {LEGIT_REACTION_MESSAGE_ID})")
 
     except discord.NotFound:
         print("❌ Message not found. Check MESSAGE_ID.")
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.channel_id == CHANNEL_ID and payload.message_id == MESSAGE_ID and str(payload.emoji) == EMOJI and not payload.member.bot:
+    if payload.channel_id == LEGIT_REACTION_CHANNEL_ID and payload.message_id == LEGIT_REACTION_MESSAGE_ID and str(payload.emoji) == LEGIT_REACTION_EMOJI and not payload.member.bot:
         guild = bot.get_guild(payload.guild_id)
-        role = guild.get_role(ROLE_ID)
+        role = guild.get_role(LEGIT_REACTION_ROLE_ID)
         member = payload.member
         channel = guild.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
