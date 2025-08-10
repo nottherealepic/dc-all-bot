@@ -154,13 +154,19 @@ def check_code_exists(code: str) -> bool:
             codes = [line.strip() for line in file.readlines()]
             return code in codes
     return False
+# --- CONFIG ---  
+LEGIT_REACTION_CHANNEL_ID = 1233843778754838679  # Channel where embed will be sent
+LEGIT_REACTION_ROLE_ID = 1232213167480901713  # Role to give on reaction
+LEGIT_REACTION_EMOJI = "✅"  # Emoji to react with
+LEGIT_REACTION_GIF_URL = "https://cdn.discordapp.com/attachments/1233831270866227271/1404083666791039079/nre_animated_low_mb.gif?ex=6899e650&is=689894d0&hm=d6cab030fec1bb426d9dc396f13efafacee9bac8dd60ecaee76f4301a2ca97ab&"  # Your GIF link
+# ---------------
 
 # ----------- Discord Bot Setup -----------
 intents = discord.Intents.default()
 intents.message_content = True  # Required for commands reading message content
 intents.guilds = True
 intents.members = True
-
+intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -692,6 +698,41 @@ async def on_ready():
         logging.error(f"Error syncing commands: {e}")
     change_status.start()
     update_uptime_embed.start()
+    channel = bot.get_channel(LEGIT_REACTION_CHANNEL_ID)
+    if channel:
+        embed = discord.Embed(
+            title="🎭 Legit Role Access",
+            description=f"React with {LEGIT_REACTION_EMOJI} to get the **Legit** role.\n\n> Press the icon below to join!",
+            color=discord.Color.pink()
+        )
+        embed.set_image(url=LEGIT_REACTION_GIF_URL)
+        msg = await channel.send(embed=embed)
+        await msg.add_reaction(LEGIT_REACTION_EMOJI)
+        print(f"📌 Reaction role message sent in #{channel.name} (ID: {msg.id})")
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.channel_id == LEGIT_REACTION_CHANNEL_ID and str(payload.emoji) == LEGIT_REACTION_EMOJI and not payload.member.bot:
+        guild = bot.get_guild(payload.guild_id)
+        role = guild.get_role(LEGIT_REACTION_ROLE_ID)
+        member = payload.member
+        channel = guild.get_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
+
+        if role and member:
+            if role not in member.roles:  # Give role only once
+                await member.add_roles(role)
+                try:
+                    await member.send(f"✅ You now have the **{role.name}** role! (One-time)")
+                except discord.Forbidden:
+                    pass
+        
+        # Remove their reaction so count stays at 1
+        await message.remove_reaction(payload.emoji, member)
+
+# ❌ No reaction remove event — role stays forever once given
+
 
 @tasks.loop(seconds=30)  
 async def change_status():
