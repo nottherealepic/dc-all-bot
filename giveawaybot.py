@@ -9,68 +9,77 @@ from discord import app_commands
 import asyncio, random, os
 from datetime import datetime, timedelta
 import pytz
-from threading import Thread
 import asyncpg
 
-
-
-# === Discord Bot Setup ===
+# === Intents & Bot Setup ===
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
+
+# Load env vars
+SERVER_NAME = os.getenv("SERVER_NAME", "MyServer")
+TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")  # PostgreSQL connection URL
+STATUS_CHANNEL_ID = int(os.getenv("STATUS_CHANNEL_ID", 0))
+UPTIME_MSG_ID = int(os.getenv("UPTIME_MSG_ID", 0))
+
+if not TOKEN:
+    print("❌ BOT TOKEN missing in environment variables!")
+    exit()
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# === Timezone & Uptime ===
+# === Timezone & Uptime Tracking ===
 tz = pytz.timezone("Asia/Kolkata")
 start_time = datetime.now(tz)
-status_channel_id = 1391327447764435005
-status_message_id = int(os.getenv("UPTIME_MSG_ID", "0"))
 status_message = None
 
-# === PostgreSQL ===
+# PostgreSQL pool
 db_pool = None
-DATABASE_URL = os.getenv("DATABASE_URL")  # Add this in Render env vars
 
-# === Format Uptime ===
+# === Helper: Format uptime ===
 def format_uptime(delta):
     days = delta.days
     hours, rem = divmod(delta.seconds, 3600)
     minutes, seconds = divmod(rem, 60)
     return f"{days:02}d:{hours:02}h:{minutes:02}m:{seconds:02}s"
 
+# === Task: Update uptime message ===
 @tasks.loop(seconds=20)
 async def update_uptime():
+    """Updates the bot's uptime embed every 20 seconds."""
     global status_message
     now = datetime.now(tz)
     uptime = format_uptime(now - start_time)
     last_update = now.strftime("%I:%M:%S %p IST")
     started = start_time.strftime("%I:%M %p IST")
 
-    embed = discord.Embed(title="🎉 EPIC GIVEAWAY BOT", color=discord.Color.green())
+    embed = discord.Embed(title=f"🎉 {SERVER_NAME} Giveaway Bot", color=discord.Color.green())
     embed.add_field(name="START", value=f"```{started}```", inline=False)
     embed.add_field(name="UPTIME", value=f"```{uptime}```", inline=False)
     embed.add_field(name="LAST UPDATE", value=f"```{last_update}```", inline=False)
 
-    channel = bot.get_channel(status_channel_id)
+    channel = bot.get_channel(STATUS_CHANNEL_ID)
     if not channel:
         return
     try:
         if not status_message:
-            status_message = await channel.fetch_message(status_message_id)
+            status_message = await channel.fetch_message(UPTIME_MSG_ID)
         await status_message.edit(embed=embed)
     except Exception as e:
         print(f"❌ Uptime update error: {e}")
 
-# === Role Check: Only ROOT or MOD ===
+# === Role Check Decorator ===
 def has_required_role():
+    """Checks if user has one of the allowed roles."""
     async def predicate(interaction: discord.Interaction) -> bool:
         allowed_roles = ["root", "mod"]
         user_roles = [role.name.lower() for role in interaction.user.roles]
         return any(role in allowed_roles for role in user_roles)
     return app_commands.check(predicate)
 
-# === Giveaway View ===
+# === Giveaway Join Button View ===
 class GiveawayView(discord.ui.View):
     def __init__(self, giveaway_id):
         super().__init__(timeout=None)
@@ -78,6 +87,7 @@ class GiveawayView(discord.ui.View):
 
     @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
     async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Adds the user to the giveaway participants table."""
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
@@ -87,7 +97,7 @@ class GiveawayView(discord.ui.View):
             )
         await interaction.response.send_message("✅ You're in!", ephemeral=True)
 
-# === Slash Commands ===
+# === Command: Start Giveaway ===
 @bot.tree.command(name="epicgiveaway", description="Start a giveaway 🎁")
 @has_required_role()
 @app_commands.describe(
@@ -105,6 +115,7 @@ async def epicgiveaway(interaction: discord.Interaction,
                        item: str,
                        winners: int,
                        channel: discord.TextChannel):
+    """Starts a giveaway and posts it to the selected channel."""
     await interaction.response.send_message(f"🎉 Giveaway started in {channel.mention}!", ephemeral=True)
 
     end_time = datetime.utcnow() + timedelta(minutes=duration)
@@ -130,10 +141,12 @@ async def epicgiveaway(interaction: discord.Interaction,
     view = GiveawayView(row["id"])
     await msg.edit(view=view)
 
+# === Command: Send Test Embed ===
 @bot.tree.command(name="say", description="Send dummy embed to channel")
 @has_required_role()
 @app_commands.describe(channel="Channel to send embed")
 async def say(interaction: discord.Interaction, channel: discord.TextChannel):
+    """Sends a dummy test embed to the selected channel."""
     embed = discord.Embed(title="📢 Dummy Embed", description="This is a test embed.", color=discord.Color.orange())
     await channel.send(embed=embed)
     await interaction.response.send_message(f"✅ Sent to {channel.mention}", ephemeral=True)
@@ -141,6 +154,7 @@ async def say(interaction: discord.Interaction, channel: discord.TextChannel):
 # === Background Giveaway Checker ===
 @tasks.loop(seconds=30)
 async def check_giveaways():
+    """Checks for ended giveaways and picks winners automatically."""
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM giveaways WHERE end_time <= NOW() AND ended = FALSE"
@@ -151,7 +165,6 @@ async def check_giveaways():
             giveaway_id = row["id"]
             prize = row["prize"]
             winners_count = row["winners_count"]
-            host_id = row["host_id"]
 
             participants = await conn.fetch("SELECT user_id FROM participants WHERE giveaway_id = $1", giveaway_id)
             user_ids = [p["user_id"] for p in participants]
@@ -180,15 +193,18 @@ async def check_giveaways():
 # === Events ===
 @bot.event
 async def on_connect():
+    """Resets start time when bot connects."""
     global start_time
     start_time = datetime.now(tz)
 
 @bot.event
 async def on_ready():
+    """Runs when bot is ready."""
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL)
     print("✅ Connected to PostgreSQL")
     print(f"✅ Logged in as {bot.user}")
+    await bot.change_presence(activity=discord.Game(name="Coded by NotTheRealEpic"))
     try:
         synced = await bot.tree.sync()
         print(f"🔁 Synced {len(synced)} commands.")
@@ -197,10 +213,6 @@ async def on_ready():
     update_uptime.start()
     check_giveaways.start()
 
-# === Run the Bot ===
+# === Run Bot ===
 if __name__ == "__main__":
-    TOKEN = os.getenv("BABU")
-    if not TOKEN:
-        print("❌ BOT TOKEN not found (env: BABU)")
-        exit()
     bot.run(TOKEN)
