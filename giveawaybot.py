@@ -17,7 +17,7 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 STATUS_CHANNEL_ID = int(os.getenv("STATUS_CHANNEL_ID", 0))
 UPTIME_MSG_ID     = int(os.getenv("UPTIME_MSG_ID", 0))
 ADMIN_ROLES       = {r.strip().lower() for r in os.getenv("ADMIN_ROLES", "").split(",") if r.strip()}
-print("Loaded admin roles:", ADMIN_ROLES)  # Debug
+print("Loaded admin roles:", ADMIN_ROLES)  
 
 if not TOKEN or not DATABASE_URL:
     raise SystemExit("❌ Missing BOT_TOKEN or DATABASE_URL in environment variables.")
@@ -89,8 +89,10 @@ async def update_uptime():
 
 def is_admin():
     async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.user.guild_permissions.administrator:
+            return True
         if not ADMIN_ROLES:
-            return interaction.user.guild_permissions.administrator
+            return False
         user_roles = {role.name.lower() for role in interaction.user.roles}
         return not ADMIN_ROLES.isdisjoint(user_roles)
     return app_commands.check(predicate)
@@ -100,11 +102,17 @@ class GiveawayView(discord.ui.View):
         super().__init__(timeout=None)
         self.giveaway_id = giveaway_id
 
-    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green, custom_id="persistent_giveaway_button")
     async def enter_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if db_pool is None:
             return await interaction.response.send_message("DB not ready. Try again.", ephemeral=True)
         async with db_pool.acquire() as conn:
+            # Check if giveaway has ended
+            giveaway = await conn.fetchrow("SELECT ended FROM giveaways WHERE id = $1", self.giveaway_id)
+            if giveaway and giveaway['ended']:
+                await interaction.response.send_message("Sorry, this giveaway has already ended.", ephemeral=True)
+                return
+
             await conn.execute("""
                 INSERT INTO participants (giveaway_id, user_id)
                 VALUES ($1, $2)
@@ -122,20 +130,24 @@ async def epicgiveaway(interaction: discord.Interaction, title: str, sponsor: st
     embed = discord.Embed(title=f"🎉 {title} 🎉", color=discord.Color.blurple())
     embed.add_field(name="🎁 Item", value=item, inline=False)
     embed.add_field(name="🏆 Winners", value=str(winners), inline=True)
-    embed.add_field(name="🕒 Ends", value=end_time_utc.astimezone(tz).strftime("%d %b %Y, %I:%M %p IST"), inline=True)
+    embed.add_field(name="🕒 Ends", value=f"<t:{int(end_time_utc.timestamp())}:R>", inline=True)
     embed.add_field(name="👤 Hosted by", value=sponsor, inline=False)
     embed.set_footer(text=f"Started by {interaction.user.display_name}")
     embed.timestamp = discord.utils.utcnow()
 
-    msg = await channel.send(embed=embed)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("""
             INSERT INTO giveaways (message_id, channel_id, end_time, prize, winners_count, host_id)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id
-        """, msg.id, channel.id, end_time_utc, item, winners, interaction.user.id)
-    view = GiveawayView(row["id"])
-    await msg.edit(view=view)
+        """, 0, channel.id, end_time_utc, item, winners, interaction.user.id)
+        
+        giveaway_id = row['id']
+        view = GiveawayView(giveaway_id)
+        msg = await channel.send(embed=embed, view=view)
+        
+        # Update the message_id in the database now that we have it
+        await conn.execute("UPDATE giveaways SET message_id = $1 WHERE id = $2", msg.id, giveaway_id)
 
 @bot.tree.command(name="dt", description="List all database tables")
 @is_admin()
@@ -160,38 +172,83 @@ async def view_table(interaction: discord.Interaction, tablename: str):
         output = "\n".join([str(dict(r)) for r in rows])
         await interaction.response.send_message(f"**First 20 rows of `{tablename}`:**\n```\n{output}\n```", ephemeral=True)
 
-@tasks.loop(seconds=30)
+# --- NEW COMMAND ADDED ---
+@bot.tree.command(name="get_msg_id", description="Sends a placeholder message and returns its ID.")
+@is_admin()
+async def get_msg_id(interaction: discord.Interaction):
+    """Sends a placeholder to the status channel and replies with the message ID."""
+    await interaction.response.defer(ephemeral=True)
+
+    if not STATUS_CHANNEL_ID:
+        await interaction.followup.send(
+            "❌ **Config Error:** `STATUS_CHANNEL_ID` is not set in your environment variables.",
+            ephemeral=True
+        )
+        return
+
+    status_channel = bot.get_channel(STATUS_CHANNEL_ID)
+    if not status_channel:
+        await interaction.followup.send(
+            f"❌ **Error:** I can't find the channel with ID `{STATUS_CHANNEL_ID}`.",
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title="📊 Bot Status Panel",
+        description="This message is managed by the bot. Do not delete.",
+        color=discord.Color.dark_grey()
+    )
+
+    try:
+        new_message = await status_channel.send(embed=embed)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            f"❌ **Permission Error:** I can't send messages in {status_channel.mention}.",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.followup.send(
+        f"✅ Message sent to {status_channel.mention}. Here is the ID for `UPTIME_MSG_ID`:"
+        f"\n```\n{new_message.id}\n```"
+    )
+# --- END OF NEW COMMAND ---
+
+@tasks.loop(seconds=15)
 async def check_giveaways():
     if db_pool is None:
         return
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM giveaways WHERE end_time <= NOW() AND ended = FALSE")
-        for row in rows:
-            message_id = row["message_id"]
-            channel_id = row["channel_id"]
+        ended_giveaways = await conn.fetch("SELECT * FROM giveaways WHERE end_time <= NOW() AND ended = FALSE")
+        for row in ended_giveaways:
             giveaway_id = row["id"]
-            prize = row["prize"]
-            winners_count = row["winners_count"]
-            participants = await conn.fetch("SELECT user_id FROM participants WHERE giveaway_id = $1", giveaway_id)
-            user_ids = [p["user_id"] for p in participants]
-            channel = bot.get_channel(channel_id)
+            channel = bot.get_channel(row["channel_id"])
             if not channel:
                 await conn.execute("UPDATE giveaways SET ended = TRUE WHERE id = $1", giveaway_id)
                 continue
+            
             try:
-                msg = await channel.fetch_message(message_id)
+                msg = await channel.fetch_message(row["message_id"])
             except discord.NotFound:
                 await conn.execute("UPDATE giveaways SET ended = TRUE WHERE id = $1", giveaway_id)
                 continue
+
+            participants = await conn.fetch("SELECT user_id FROM participants WHERE giveaway_id = $1", giveaway_id)
+            user_ids = [p["user_id"] for p in participants]
+            
             result_embed = discord.Embed(title="🎉 Giveaway Ended!", color=discord.Color.red())
-            result_embed.add_field(name="🎁 Prize", value=prize or "Unknown", inline=False)
-            if len(user_ids) < max(1, winners_count):
-                result_embed.add_field(name="❌ Result", value="Not enough participants", inline=False)
+            result_embed.add_field(name="🎁 Prize", value=row["prize"] or "Not specified", inline=False)
+
+            if not user_ids or len(user_ids) < row['winners_count']:
+                winners_text = "Not enough participants to determine a winner."
             else:
-                winners = random.sample(user_ids, min(winners_count, len(user_ids)))
-                mentions = ", ".join(f"<@{uid}>" for uid in winners)
-                result_embed.add_field(name="🏆 Winner(s)", value=mentions, inline=False)
-            result_embed.set_footer(text="Ended via auto-check")
+                winners = random.sample(user_ids, k=min(row["winners_count"], len(user_ids)))
+                winners_text = ", ".join(f"<@{uid}>" for uid in winners)
+
+            result_embed.add_field(name="🏆 Winner(s)", value=winners_text, inline=False)
+            result_embed.set_footer(text="Giveaway concluded.")
+            
             await msg.edit(embed=result_embed, view=None)
             await conn.execute("UPDATE giveaways SET ended = TRUE WHERE id = $1", giveaway_id)
 
@@ -203,18 +260,29 @@ async def on_connect():
 @bot.event
 async def on_ready():
     global db_pool
-    print("🔌 Connecting PostgreSQL pool...")
-    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
-    await init_db(db_pool)
-    print("✅ Connected to PostgreSQL & ensured tables.")
+    print("🔌 Connecting to PostgreSQL...")
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+        await init_db(db_pool)
+        print("✅ Connected to PostgreSQL & ensured tables.")
+    except Exception as e:
+        print(f"❌ PostgreSQL connection failed: {e}")
+        return
+
+    # Add persistent view for giveaways
+    view = GiveawayView(giveaway_id=0) # We don't need a specific ID here, just the button structure
+    bot.add_view(view, message_id=None) # The custom_id will handle routing
+
     print(f"✅ Logged in as {bot.user}")
-    await bot.change_presence(activity=discord.Game(name="Coded by NotTheRealEpic"))
+    await bot.change_presence(activity=discord.Game(name="Managing Giveaways | Coded by NotTheRealEpic"))
     try:
         synced = await bot.tree.sync()
         print(f"🔁 Synced {len(synced)} application command(s).")
     except Exception as e:
         print(f"⚠️ Slash command sync failed: {e}")
-    update_uptime.start()
+    
+    if STATUS_CHANNEL_ID and UPTIME_MSG_ID:
+        update_uptime.start()
     check_giveaways.start()
 
 if __name__ == "__main__":
