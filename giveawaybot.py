@@ -17,6 +17,7 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 STATUS_CHANNEL_ID = int(os.getenv("STATUS_CHANNEL_ID", 0))
 UPTIME_MSG_ID     = int(os.getenv("UPTIME_MSG_ID", 0))
 ADMIN_ROLES       = {r.strip().lower() for r in os.getenv("ADMIN_ROLES", "").split(",") if r.strip()}
+print("Loaded admin roles:", ADMIN_ROLES)  # Debug
 
 if not TOKEN or not DATABASE_URL:
     raise SystemExit("❌ Missing BOT_TOKEN or DATABASE_URL in environment variables.")
