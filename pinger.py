@@ -36,7 +36,8 @@ RENDER_BOTS = {
     "NOTTHEREALEPIC": "https://notepicbot.onrender.com",
     "AANI": "https://aani-pp.onrender.com",
     "BE MY VALENTINE APP": "https://be-my-valentine-app.onrender.com",
-    "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com"
+    "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com",
+    "face": "https://veyonafashions.onrender.com"
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
