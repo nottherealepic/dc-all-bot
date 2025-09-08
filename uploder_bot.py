@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from flask import Flask, request, jsonify
 import os
+import threading
 import asyncio
 
 TOKEN = os.getenv("UPLODER_BOT_TOKEN") 
@@ -37,6 +38,12 @@ async def fetch_cdn_url(channel_id, file_id):
     except Exception as e:
         print(f"Error fetching message: {e}")
         return None
+
+# --- Run Flask in a separate thread ---
+def run_flask():
+    app.run(host="0.0.0.0", port=5000)
+
+threading.Thread(target=run_flask).start()
 
 # --- Run Discord Bot ---
 bot.run(TOKEN)
