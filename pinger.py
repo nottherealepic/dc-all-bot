@@ -38,7 +38,8 @@ RENDER_BOTS = {
     "BE MY VALENTINE APP": "https://be-my-valentine-app.onrender.com",
     "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com",
     "face": "https://veyonafashions.onrender.com",
-    "CoupleWalls": "https://couplewalls.onrender.com"
+    "CoupleWalls": "https://couplewalls.onrender.com",
+    "file uploder bot": "https://nre-uploader-bot.onrender.com",    
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
