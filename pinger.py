@@ -35,7 +35,6 @@ RENDER_BOTS = {
     "3 IN ONE": "https://dc-all-bot.onrender.com",
     "NRE UPLODER": "https://nre-uploader-bot.onrender.com",
     "nremods.com": "https://nremods.onrender.com/",
-    "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com",
     "CoupleWalls": "https://couplewalls.onrender.com",    
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
