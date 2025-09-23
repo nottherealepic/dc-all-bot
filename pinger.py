@@ -33,13 +33,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Render URLs with display names
 RENDER_BOTS = {
     "3 IN ONE": "https://dc-all-bot.onrender.com",
-    "NOTTHEREALEPIC": "https://notepicbot.onrender.com",
+    "NRE UPLODER": "https://nre-uploader-bot.onrender.com",
     "nremods.com": "https://nremods.onrender.com/",
-    "BE MY VALENTINE APP": "https://be-my-valentine-app.onrender.com",
     "EPIC GIVEAWAY BOT": "https://epicgiveawaybot.onrender.com",
-    "face": "https://veyonafashions.onrender.com",
-    "CoupleWalls": "https://couplewalls.onrender.com",
-    "file uploder bot": "https://nre-uploader-bot.onrender.com",    
+    "CoupleWalls": "https://couplewalls.onrender.com",    
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
