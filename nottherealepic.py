@@ -791,6 +791,11 @@ async def on_member_remove(member):
         if time_spent < timedelta(minutes=TIME_LIMIT_MINUTES):
             try:
                 # Ban for 30 days
+                await member.send(
+                                "<a:lightning:1369441281264189601> {user}, welcome to the NOTTHEREALEPIC Discord server.\n\n"
+                                "<a:animetedrule:1234044425496428545> Read the rules and verify to get the LEGIT <a:animetedverify:1234049755844448329> role.\n\n"
+                                "https://cdn.discordapp.com/attachments/1233831270866227271/1379393664962527292/nre_animated_low_mb.gif?ex=6842b6f5&is=68416575&hm=74ad849bb664592ec36bc71b9b8ebfed5b030cd6b9d14d18fe629c50ad6fbd58&"
+                            )
                 await member.ban(reason="Accessed file and left within short time.", delete_message_days=0)
 
                 # Send DM
