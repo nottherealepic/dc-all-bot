@@ -807,8 +807,10 @@ async def on_member_remove(member):
                             )
                 except:
                     print(f"Could not DM {member}")
+                    
             except:
                 print(f"Could not ban {member}")
+                await member.ban(reason="Accessed file and left within short time.", delete_message_days=0)
     # Cleanup
     user_activity.pop(member.id, None)
 
