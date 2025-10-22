@@ -36,6 +36,7 @@ RENDER_BOTS = {
     "NRE UPLODER": "https://nre-uploader-bot.onrender.com",
     "nremods.com": "https://nremods.onrender.com/",
     "CoupleWalls": "https://couplewalls.onrender.com",    
+    "Divine Bot (A S)": "https://divine-bot-2vp1.onrender.com/",
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
