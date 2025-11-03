@@ -784,13 +784,12 @@ async def on_member_update(before, after):
 async def on_member_remove(member: discord.Member):
     activity = user_activity.get(member.id)
     if not activity or not activity.get("got_role"):
-        return  # Ignore users without the tracked role
+        return
 
-    time_spent = datetime.utcnow() - activity["joined"]
-
+    time_spent = datetime.now(timezone.utc) - activity["joined"]
     if time_spent < timedelta(minutes=TIME_LIMIT_MINUTES):
         user_id = member.id
-        username = str(member)  # e.g., "username#1234"
+        username = str(member)
 
         msg = (
             f"<a:lightning:1369441281264189601> {member.name}, welcome to the NOTTHEREALEPIC Discord server.\n\n"
@@ -801,30 +800,29 @@ async def on_member_remove(member: discord.Member):
 
         print(f"[INFO] Detected {username} ({user_id}) left too quickly.")
 
-        # Try to DM (even if they left)
+        # Try DM even after leaving
         try:
-            user = await bot.fetch_user(user_id)  # Fetches global user object
+            user = await bot.fetch_user(user_id)
             await user.send(msg)
-            print(f"[INFO] DM sent to {username} ({user_id})")
+            print(f"[INFO] DM sent to {username}")
         except discord.Forbidden:
-            print(f"[WARN] Cannot DM {username} ({user_id}) — privacy settings or blocked DMs.")
+            print(f"[WARN] Cannot DM {username} — privacy settings.")
         except discord.HTTPException as e:
-            print(f"[WARN] Failed to DM {username} ({user_id}): {e}")
+            print(f"[WARN] DM failed for {username}: {e}")
 
-        # Try to ban them
+        # Ban user by ID
         try:
             await member.guild.ban(
                 discord.Object(id=user_id),
                 reason="Accessed file and left within short time.",
-                delete_message_days=0
+                delete_message_seconds=0
             )
             print(f"[INFO] Banned {username} ({user_id})")
         except discord.Forbidden:
-            print(f"[ERROR] Missing permissions to ban {username} ({user_id}).")
+            print(f"[ERROR] Missing permissions to ban {username}")
         except discord.HTTPException as e:
-            print(f"[ERROR] Ban failed for {username} ({user_id}): {e}")
+            print(f"[ERROR] Ban failed for {username}: {e}")
 
-    # Always clean up tracking data
     user_activity.pop(member.id, None)
 
 
