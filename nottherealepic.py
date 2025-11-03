@@ -781,37 +781,50 @@ async def on_member_update(before, after):
             user_activity[after.id]["got_role"] = True
 
 @bot.event
-async def on_member_remove(member):
+async def on_member_remove(member: discord.Member):
     activity = user_activity.get(member.id)
-    if not activity:
-        return
+    if not activity or not activity.get("got_role"):
+        return  # Ignore users without the tracked role
 
-    if activity["got_role"]:
-        time_spent = datetime.utcnow() - activity["joined"]
-        if time_spent < timedelta(minutes=TIME_LIMIT_MINUTES):
-            try:
-                # Ban for 30 days
-                await member.send(
-                                "<a:lightning:1369441281264189601> {user}, welcome to the NOTTHEREALEPIC Discord server.\n\n"
-                                "<a:animetedrule:1234044425496428545> Read the rules and verify to get the LEGIT <a:animetedverify:1234049755844448329> role.\n\n"
-                                "https://cdn.discordapp.com/attachments/1233831270866227271/1379393664962527292/nre_animated_low_mb.gif?ex=6842b6f5&is=68416575&hm=74ad849bb664592ec36bc71b9b8ebfed5b030cd6b9d14d18fe629c50ad6fbd58&"
-                            )
-                await member.ban(reason="Accessed file and left within short time.", delete_message_days=0)
+    time_spent = datetime.utcnow() - activity["joined"]
 
-                # Send DM
-                try:
-                    await member.send(
-                                "<a:lightning:1369441281264189601> {user}, welcome to the NOTTHEREALEPIC Discord server.\n\n"
-                                "<a:animetedrule:1234044425496428545> Read the rules and verify to get the LEGIT <a:animetedverify:1234049755844448329> role.\n\n"
-                                "https://cdn.discordapp.com/attachments/1233831270866227271/1379393664962527292/nre_animated_low_mb.gif?ex=6842b6f5&is=68416575&hm=74ad849bb664592ec36bc71b9b8ebfed5b030cd6b9d14d18fe629c50ad6fbd58&"
-                            )
-                except:
-                    print(f"Could not DM {member}")
-                    
-            except:
-                print(f"Could not ban {member}")
-                await member.ban(reason="Accessed file and left within short time.", delete_message_days=0)
-    # Cleanup
+    if time_spent < timedelta(minutes=TIME_LIMIT_MINUTES):
+        user_id = member.id
+        username = str(member)  # e.g., "username#1234"
+
+        msg = (
+            f"<a:lightning:1369441281264189601> {member.name}, welcome to the NOTTHEREALEPIC Discord server.\n\n"
+            "<a:animetedrule:1234044425496428545> Read the rules and verify to get the LEGIT "
+            "<a:animetedverify:1234049755844448329> role.\n\n"
+            "https://cdn.discordapp.com/attachments/1233831270866227271/1379393664962527292/nre_animated_low_mb.gif"
+        )
+
+        print(f"[INFO] Detected {username} ({user_id}) left too quickly.")
+
+        # Try to DM (even if they left)
+        try:
+            user = await bot.fetch_user(user_id)  # Fetches global user object
+            await user.send(msg)
+            print(f"[INFO] DM sent to {username} ({user_id})")
+        except discord.Forbidden:
+            print(f"[WARN] Cannot DM {username} ({user_id}) — privacy settings or blocked DMs.")
+        except discord.HTTPException as e:
+            print(f"[WARN] Failed to DM {username} ({user_id}): {e}")
+
+        # Try to ban them
+        try:
+            await member.guild.ban(
+                discord.Object(id=user_id),
+                reason="Accessed file and left within short time.",
+                delete_message_days=0
+            )
+            print(f"[INFO] Banned {username} ({user_id})")
+        except discord.Forbidden:
+            print(f"[ERROR] Missing permissions to ban {username} ({user_id}).")
+        except discord.HTTPException as e:
+            print(f"[ERROR] Ban failed for {username} ({user_id}): {e}")
+
+    # Always clean up tracking data
     user_activity.pop(member.id, None)
 
 
