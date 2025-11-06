@@ -26,7 +26,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_bot, args=("nottherealepic.py",)).start()
     threading.Thread(target=run_bot, args=("giveawaybot.py",)).start()
     threading.Thread(target=run_bot, args=("pinger.py",)).start()
-    # threading.Thread(target=run_bot, args=("uploder_bot.py",)).start()
+    threading.Thread(target=run_bot, args=("divine_hall.py",)).start()
     # threading.Thread(target=run_bot, args=("epic_yt_downloader.py",)).start()
 
     # 🛡️ Keep main thread alive forever
