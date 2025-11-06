@@ -99,10 +99,23 @@ async def on_ready():
 
 # ------------------- SLASH COMMANDS -------------------
 
-@bot.tree.command(name="setup_lineup", description="Creates the leaderboard message and provides setup info.")
-@is_mod()
+# The specific user ID you want to grant access to
+OWNER_ID = 891355913271771146
+
+@bot.tree.command(name="setup_lineup", description="Creates the leaderboard message (Owner only).")
+# The @is_mod() decorator has been removed.
 async def setup_lineup(interaction: discord.Interaction):
-    """Sends the initial embed and provides setup instructions."""
+    """Sends the initial embed and provides setup instructions. ONLY FOR BOT OWNER."""
+
+    # NEW: Check if the user running the command is the owner.
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message(
+            "❌ This command can only be used by the bot owner.",
+            ephemeral=True
+        )
+        return  # Stop the command if the user is not the owner.
+
+    # The rest of the code is the same as before.
     embed = discord.Embed(
         title="Leaderboard Initializing...",
         description="This message will automatically update with the latest leaderboard data.",
