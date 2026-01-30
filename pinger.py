@@ -38,6 +38,7 @@ RENDER_BOTS = {
     "CoupleWalls": "https://couplewalls.onrender.com",    
     "Divine Bot (A S)": "https://divine-bot-2vp1.onrender.com/",
     "epicflacmusic":"https://epicflacmusic.onrender.com/",
+    "pin fetch":"https://autocad-education.onrender.com/",
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
