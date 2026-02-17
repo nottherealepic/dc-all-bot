@@ -1,52 +1,37 @@
 import subprocess
-import threading
 import time
 import sys
 import signal
 import os
-from flask import Flask, send_from_directory
 
 # ----------- Configuration ----------- #
-# List your bot files here
-BOT_FILES = [
-    "nottherealepic.py",
-    "giveawaybot.py",
-    "pinger.py"
-    # "divine_hall.py",
-    # "epic_yt_downloader.py"
+# pinger.py MUST run first because it hosts the Web Server
+BOTS = [
+    {"file": "pinger.py", "delay": 0},      # Starts immediately to bind Port 8080
+    {"file": "nottherealepic.py", "delay": 30}, # Waits 30s to avoid Discord Rate Limit
 ]
 
-# Time to wait (in seconds) between starting each bot to avoid Rate Limits
-STARTUP_DELAY = 15 
-
-# ----------- Flask App ----------- #
-app = Flask("")
-
-@app.route("/")
-def home():
-    # Serves the status page (make sure the file exists in /static)
-    return send_from_directory("static", "bot_status.html")
-
-def run_flask():
-    # Use os.environ.get to play nice with Render's port assignment
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-# ----------- Process Manager ----------- #
 processes = []
 
-def start_bot(filename):
-    """Starts a bot using the current Python interpreter."""
+def start_bot(bot_info):
+    """Starts a bot subprocess."""
+    filename = bot_info["file"]
+    delay = bot_info["delay"]
+    
+    if delay > 0:
+        print(f"[SYSTEM] ⏳ Waiting {delay}s before starting {filename}...")
+        time.sleep(delay)
+        
     print(f"[SYSTEM] 🚀 Launching {filename}...")
-    # sys.executable ensures we use the exact same Python environment
+    # Uses the same Python interpreter as the main script
     proc = subprocess.Popen([sys.executable, filename])
     processes.append(proc)
 
 def cleanup_processes(signum, frame):
-    """Kills all subprocesses when the main script is stopped."""
+    """Force kills all bots on shutdown."""
     print("\n[SYSTEM] 🛑 Shutting down all bots...")
     for proc in processes:
-        if proc.poll() is None:  # If process is still running
+        if proc.poll() is None:
             proc.terminate()
             try:
                 proc.wait(timeout=5)
@@ -55,29 +40,20 @@ def cleanup_processes(signum, frame):
     print("[SYSTEM] All bots stopped. Exiting.")
     sys.exit(0)
 
-# ----------- Main Execution ----------- #
 if __name__ == "__main__":
-    # 1. Register signal handlers (Detects Stop/Restart commands from Render)
+    # Register shutdown signals (CRITICAL for Render)
     signal.signal(signal.SIGINT, cleanup_processes)
     signal.signal(signal.SIGTERM, cleanup_processes)
 
-    # 2. Start Flask server in a separate thread
-    print("[SYSTEM] Starting Web Server...")
-    threading.Thread(target=run_flask, daemon=True).start()
+    print("[SYSTEM] Initialize Bot Manager...")
 
-    # 3. Start Bots with a Delay (The Fix for 429 Errors)
-    print(f"[SYSTEM] Starting {len(BOT_FILES)} bots with a {STARTUP_DELAY}s delay...")
-    
-    for bot_file in BOT_FILES:
-        start_bot(bot_file)
-        time.sleep(STARTUP_DELAY)  # <--- CRITICAL: Waits before starting the next one
+    # Start bots one by one
+    for bot in BOTS:
+        start_bot(bot)
 
-    print("[SYSTEM] ✅ All bots launched. Monitoring...")
-
-    # 4. Keep the main thread alive
+    # Keep main process alive
     try:
         while True:
             time.sleep(60)
-            # Optional: Check if bots are still running here
     except KeyboardInterrupt:
         cleanup_processes(None, None)
