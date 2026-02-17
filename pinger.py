@@ -1,14 +1,14 @@
 import os
-import random
-import asyncio
 import aiohttp
 import discord
 import pytz
 import threading
-from datetime import datetime, timedelta
+import asyncio
+from datetime import datetime, timedelta, timezone
 from discord.ext import commands, tasks
 from discord import app_commands
 from dotenv import load_dotenv
+from flask import Flask, send_from_directory, request, jsonify
 
 # Load env variables
 load_dotenv()
@@ -18,7 +18,7 @@ MESSAGE_ID = int(os.getenv("PINGER_MESSAGE_ID"))
 
 # Timezone
 IST = pytz.timezone("Asia/Kolkata")
-START_TIME = None  # Set inside on_ready
+START_TIME = datetime.now(timezone.utc)
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -28,133 +28,150 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ----------- FLASK APP & WEBHOOK ----------- #
+app = Flask("")
 
+@app.route("/")
+def home():
+    # Serves the status page
+    try:
+        return send_from_directory("static", "bot_status.html")
+    except Exception:
+        return "Bot is Online (static/bot_status.html missing)"
 
-# Render URLs with display names
+# Merged Feature: Uploader Bot Webhook
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.json
+    channel_id = int(data.get("channel_id"))
+    file_id = int(data.get("file_id"))
+
+    # Use the running bot to fetch the URL safely
+    if not bot.is_ready():
+        return jsonify({"error": "Bot not ready"}), 503
+
+    future = asyncio.run_coroutine_threadsafe(fetch_cdn_url(channel_id, file_id), bot.loop)
+    try:
+        cdn_url = future.result(timeout=10) # 10s timeout
+        return jsonify({"cdn_url": cdn_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+async def fetch_cdn_url(channel_id, file_id):
+    try:
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            # Try fetching if not in cache
+            try:
+                channel = await bot.fetch_channel(channel_id)
+            except:
+                return None
+        
+        message = await channel.fetch_message(file_id)
+        if message.attachments:
+            return message.attachments[0].url
+        return None
+    except Exception as e:
+        print(f"❌ Webhook Fetch Error: {e}")
+        return None
+
+def run_flask():
+    # Binds to the Render PORT
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+# ----------- PINGER LOGIC ----------- #
+
 RENDER_BOTS = {
     "3 IN ONE": "https://dc-all-bot.onrender.com",
     "NRE UPLODER": "https://nre-uploader-bot.onrender.com",
     "nremods.com": "https://nremods.onrender.com/",
     "CoupleWalls": "https://couplewalls.onrender.com",    
     "Divine Bot (A S)": "https://divine-bot-2vp1.onrender.com/",
-    "epicflacmusic":"https://epicflacmusic.onrender.com/",
-    "pin fetch":"https://autocad-education.onrender.com/",
+    "epicflacmusic": "https://epicflacmusic.onrender.com/",
+    "pin fetch": "https://autocad-education.onrender.com/",
 }
 bot_statuses = {name: "🔄 CHECKING..." for name in RENDER_BOTS}
 
-# Update embed every 10 seconds
 @tasks.loop(seconds=10)
 async def update_uptime_embed():
     try:
         channel = bot.get_channel(CHANNEL_ID)
-        if not channel:
-            print("❌ Channel not found.")
-            return
+        if not channel: return
 
         try:
             message = await channel.fetch_message(MESSAGE_ID)
-        except discord.NotFound:
-            print("❌ Message not found.")
-            return
+        except discord.NotFound: return
 
         now = datetime.now(IST)
-        uptime = now - START_TIME
+        # Fix: Ensure START_TIME is aware before subtracting
+        start_ist = START_TIME.astimezone(IST)
+        uptime = now - start_ist
+        
         if uptime.total_seconds() < 0:
             uptime = timedelta(seconds=0)
 
-        start_str = START_TIME.strftime("%I:%M:%S %p")
-        now_str = now.strftime("%I:%M:%S %p")
-        days = uptime.days
-        hours, rem = divmod(uptime.seconds, 3600)
-        minutes, seconds = divmod(rem, 60)
-        uptime_str = f"{days:02}:{hours:02}:{minutes:02}:{seconds:02}"
-
+        uptime_str = str(uptime).split('.')[0] # Cleaner formatting
+        
         status_lines = [f"{name.ljust(20)} ```{status}```" for name, status in bot_statuses.items()]
         status_block = "\n".join(status_lines)
 
         embed = discord.Embed(title="🟢 UPTIME MONITOR", color=discord.Color.green())
         embed.description = (
-            f"START         ```{start_str}```\n"
-            f"UPTIME        ```{uptime_str}```\n"
-            f"LAST UPDATE   ```{now_str}```\n\n"
+            f"START       ```{start_ist.strftime('%I:%M:%S %p')}```\n"
+            f"UPTIME      ```{uptime_str}```\n"
+            f"LAST UPDATE ```{now.strftime('%I:%M:%S %p')}```\n\n"
             f"{status_block}"
         )
         await message.edit(embed=embed)
 
     except Exception as e:
-        print(f"❌ update_uptime_embed crashed: {e}")
+        print(f"❌ Embed Update Error: {e}")
 
-# Ping every URL & update status
 @tasks.loop(seconds=60)
 async def ping_render_urls():
-    try:
-        async with aiohttp.ClientSession() as session:
-            for name, url in RENDER_BOTS.items():
-                try:
-                    async with session.get(url, timeout=5) as response:
-                        if response.status == 200:
-                            bot_statuses[name] = "ONLINE"
-                        else:
-                            bot_statuses[name] = "OFFLINE"
-                except Exception:
-                    bot_statuses[name] = "OFFLINE"
-    except Exception as e:
-        print(f"❌ ping_render_urls crashed: {e}")
+    async with aiohttp.ClientSession() as session:
+        for name, url in RENDER_BOTS.items():
+            try:
+                async with session.get(url, timeout=10) as response:
+                    bot_statuses[name] = "ONLINE" if response.status == 200 else "OFFLINE"
+            except:
+                bot_statuses[name] = "OFFLINE"
 
-# Watchdog to auto-restart tasks
+# Watchdog to keep tasks alive
 @tasks.loop(minutes=1)
 async def watchdog():
     if not update_uptime_embed.is_running():
-        print("🔁 Restarting update_uptime_embed")
         update_uptime_embed.start()
-
     if not ping_render_urls.is_running():
-        print("🔁 Restarting ping_render_urls")
         ping_render_urls.start()
 
-# Permission check
+# Helper Command
+@bot.tree.command(name="saym", description="Send a dummy embed")
+@app_commands.describe(channel="Channel to send to")
 @app_commands.checks.has_any_role("ROOT", "MOD")
-@bot.tree.command(name="saym", description="Send a dummy embed to a specified channel")
-@app_commands.describe(channel="The channel to send the dummy embed")
 async def saym(interaction: discord.Interaction, channel: discord.TextChannel):
     await interaction.response.defer(ephemeral=True)
-    try:
-        embed = discord.Embed(
-            title="📦 Dummy Embed",
-            description="This is a sample embed sent by the bot.",
-            color=discord.Color.purple()
-        )
-        embed.set_footer(text="Sent by /saym command")
-        await channel.send(embed=embed)
-        await interaction.followup.send(f"✅ Embed sent to {channel.mention}.")
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Failed to send embed: `{e}`")
+    embed = discord.Embed(title="📦 Dummy Embed", description="Sample embed.", color=discord.Color.purple())
+    await channel.send(embed=embed)
+    await interaction.followup.send(f"✅ Sent to {channel.mention}")
 
-# Handle permission error
-@saym.error
-async def saym_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.CheckFailure):
-        await interaction.response.send_message("❌ You don’t have permission to use this command.", ephemeral=True)
-
-# on_ready setup
 @bot.event
 async def on_ready():
-    global START_TIME
-    START_TIME = datetime.now(IST)
-
-    print(f"✅ Logged in as {bot.user}")
+    print(f"✅ PINGER & WEBHOOK Logged in as {bot.user}")
     await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching,
-        name="A heart for bots, not humans... 100% synthetic love 💘⚙️"
+        type=discord.ActivityType.watching, 
+        name="Servers & Uploads 💘⚙️"
     ))
-
     await bot.tree.sync()
-    if not ping_render_urls.is_running():
-        ping_render_urls.start()
-    if not update_uptime_embed.is_running():
-        update_uptime_embed.start()
-    if not watchdog.is_running():
-        watchdog.start()
+    
+    # Start Tasks
+    if not ping_render_urls.is_running(): ping_render_urls.start()
+    if not update_uptime_embed.is_running(): update_uptime_embed.start()
+    if not watchdog.is_running(): watchdog.start()
+    
+    # Start Flask Server in Thread
+    threading.Thread(target=run_flask, daemon=True).start()
 
-# Start Flask and bot
-bot.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(TOKEN)
