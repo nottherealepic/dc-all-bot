@@ -4,378 +4,279 @@ import time
 import random
 import logging
 import unicodedata
-import discord
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+
+import discord
 from discord.ext import commands, tasks
 from discord import app_commands, Embed
 
-# ----------- Custom Data Imports -----------
-# Make sure these files exist in your folder!
+# Import Data (Ensure these files exist)
 try:
     from files import files_data
     from pro_file_info import pro_file_info
     from paid_id import paid_id_data
     from licence import license_descriptions
-except ImportError as e:
-    logging.critical(f"❌ Missing data file: {e}")
+except ImportError:
+    print("❌ Critical: Data files missing.")
     sys.exit(1)
 
-# ----------- Configuration -----------
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s - %(message)s')
+# ----------- SETUP -----------
+logging.basicConfig(level=logging.INFO)
+TOKEN = os.getenv("asmr")
 
-TOKEN = os.getenv("asmr")  # Ensure this matches your Env Variable
-UPTIME_CHANNEL_ID = 1369435929604784262
-UPTIME_MSG_ID = 1391327711926157463
-
-LEGIT_REACTION_CHANNEL_ID = 1233843778754838679
-LEGIT_REACTION_MESSAGE_ID = 1404085986098413640
-LEGIT_REACTION_ROLE_ID = 1232213167480901713
-LEGIT_REACTION_EMOJI = "✅"
-LEGIT_REACTION_GIF = "https://cdn.discordapp.com/attachments/1233831270866227271/1404083666791039079/nre_animated_low_mb.gif"
-
-TARGET_ROLE_NAME = "LEGIT"
-TIME_LIMIT_MINUTES = 180  # Hit-and-run threshold
-
-# ----------- Bot Setup -----------
+# Bot Config
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.reactions = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
-start_time = datetime.now(timezone.utc)
 
-# ----------- Globals & Utils -----------
+# Global Vars
+start_time = datetime.now(timezone.utc)
 user_activity = {}
 user_message_tracker = defaultdict(list)
 
-statuses = [
-    "Playing GTA 6 — don't ask.", "Modding GTA like it's a career.",
-    "ZModeler: cracked, patched, broken.", "Scripting when I feel like it.",
-    "Helping, but not politely.", "Banning you next, probably.",
-    "Discord mod — not your therapist.", "Fixing what Rockstar couldn’t."
-]
+# Config Constants
+LEGIT_ROLE_ID = 1232213167480901713
+LEGIT_CHANNEL_ID = 1233843778754838679
+LEGIT_MSG_ID = 1404085986098413640
+TIME_LIMIT_MINUTES = 180
+
+# ----------- SMART SPAM PROTECTION SYSTEM -----------
+class SmartCooldown:
+    def __init__(self):
+        self.user_limits = defaultdict(lambda: {"count": 0, "last_time": 0, "penalty_until": 0})
+    
+    def check(self, user_id):
+        now = time.time()
+        data = self.user_limits[user_id]
+        
+        # Check Penalty
+        if now < data["penalty_until"]:
+            remaining = int(data["penalty_until"] - now)
+            return False, f"⛔ Cooldown: You are moving too fast! Wait {remaining}s."
+        
+        # Reset count if 10 seconds passed
+        if now - data["last_time"] > 10:
+            data["count"] = 0
+            
+        data["count"] += 1
+        data["last_time"] = now
+        
+        # Logic: > 3 commands in 10 seconds = Penalty
+        if data["count"] > 3:
+            # Smart Penalty: Increases if they keep spamming
+            penalty_duration = 10 if data["count"] == 4 else 60
+            data["penalty_until"] = now + penalty_duration
+            return False, f"⚠️ Slow down! You triggered a {penalty_duration}s cooldown."
+            
+        return True, None
+
+spam_police = SmartCooldown()
+
+# Decorator for commands
+def smart_rate_limit():
+    async def predicate(interaction: discord.Interaction):
+        is_safe, msg = spam_police.check(interaction.user.id)
+        if not is_safe:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
+# ----------- UTILS -----------
+def normalize_text(text):
+    return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()
 
 bad_words = [
     "free nitro", "free nude", "sex", "onlyfans", "steam giveaway", "free robux",
     "discordnitro", "steamcommunity-", "epicgames-", "nitro-gift"
 ]
 
-def normalize_text(text):
-    return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()
+# ----------- COMMANDS (ALL FEATURES) -----------
 
-def is_admin_or_mod(interaction: discord.Interaction):
-    if interaction.user.guild_permissions.administrator: return True
-    user_roles = [r.name.upper() for r in interaction.user.roles]
-    return any(r in ["ROOT", "MOD"] for r in user_roles)
+# 1. PASS COMMAND
+@bot.tree.command(name="pass", description="Get file password & info")
+@app_commands.checks.has_role("LEGIT")
+@smart_rate_limit()
+async def pass_cmd(interaction: discord.Interaction, modelname: str):
+    if modelname in files_data:
+        d = files_data[modelname]
+        desc = license_descriptions.get(d.get("license"), "N/A")
+        
+        embed = Embed(title=f"📂 Access: {modelname}", color=0x2ecc71)
+        embed.add_field(name="File Name", value=f"`{modelname}`", inline=False)
+        embed.add_field(name="Version", value=f"`{d.get('version', 'N/A')}`", inline=True)
+        embed.add_field(name="Size", value=f"`{d.get('size', 'N/A')}`", inline=True)
+        embed.add_field(name="Password", value=f"```yaml\n{d['password']}```", inline=False)
+        embed.add_field(name="License", value=f"`{d.get('license', 'N/A')}`", inline=True)
+        embed.add_field(name="Details", value=f"```{desc}```", inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ File not found.", ephemeral=True)
 
-def generate_code():
-    return f"epic{random.randint(1, 9999):04d}"
-
-def check_restart_limit():
-    """Prevents rapid restart loops."""
-    try:
-        path = "last_restart.txt"
-        current_time = time.time()
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                last_time = float(f.read().strip())
-            if current_time - last_time < 900:  # 15 mins
-                logging.warning("⛔ Restarted too quickly.")
-        with open(path, "w") as f:
-            f.write(str(current_time))
-    except Exception:
-        pass
-
-check_restart_limit()
-
-# ----------- Autocomplete -----------
-async def model_autocomplete(interaction: discord.Interaction, current: str):
+@pass_cmd.autocomplete("modelname")
+async def pass_autocomplete(inter, current: str):
     return [app_commands.Choice(name=m, value=m) for m in files_data if current.lower() in m.lower()][:25]
 
-async def code_autocomplete(interaction: discord.Interaction, current: str):
+# 2. CODE GEN
+@bot.tree.command(name="code", description="Generate Customer Code (ROOT)")
+@app_commands.checks.has_role("ROOT")
+async def code_cmd(interaction: discord.Interaction):
+    code = f"epic{random.randint(1,9999):04d}"
+    with open("generated_codes.txt", "a") as f: f.write(code + "\n")
+    await interaction.response.send_message(f"✅ Generated: `{code}`", ephemeral=True)
+
+# 3. PAID ID
+@bot.tree.command(name="paid_id", description="Customer Lookup (ROOT)")
+@app_commands.checks.has_role("ROOT")
+async def paid_id_cmd(interaction: discord.Interaction, code: str):
+    if code in paid_id_data:
+        d = paid_id_data[code]
+        embed = Embed(title=f"👤 Customer: {code}", color=0x3498db)
+        for k, v in d.items(): embed.add_field(name=k, value=f"`{v}`", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Not found.", ephemeral=True)
+
+@paid_id_cmd.autocomplete("code")
+async def pid_autocomplete(inter, current: str):
     return [app_commands.Choice(name=c, value=c) for c in paid_id_data if current.lower() in c.lower()][:25]
 
-async def fid_autocomplete(interaction: discord.Interaction, current: str):
+# 4. PRO INFO
+@bot.tree.command(name="proinfo", description="Paid File Details")
+@app_commands.checks.has_role("LEGIT")
+@smart_rate_limit()
+async def proinfo_cmd(interaction: discord.Interaction, fid: str):
+    if fid in pro_file_info:
+        await interaction.response.defer()
+        d = pro_file_info[fid]
+        # Send parts safely
+        for k in ['FIRST', 'SEC', 'THIRD', 'FOUR']:
+            if d.get(k): await interaction.followup.send(d[k])
+    else:
+        await interaction.response.send_message("❌ ID Not Found", ephemeral=True)
+
+@proinfo_cmd.autocomplete("fid")
+async def fid_autocomplete(inter, current: str):
     return [app_commands.Choice(name=f, value=f) for f in pro_file_info if current.lower() in f.lower()][:25]
 
-# ----------- COMMANDS -----------
-
-@bot.tree.command(name="pass", description="Get info & password for Mod file")
-@app_commands.describe(modelname="File Name")
-@app_commands.autocomplete(modelname=model_autocomplete)
-@app_commands.checks.has_role("LEGIT")
-async def pass_command(interaction: discord.Interaction, modelname: str):
-    if modelname not in files_data:
-        await interaction.response.send_message("❌ Model not found!", ephemeral=True)
-        return
-
-    data = files_data[modelname]
-    desc = license_descriptions.get(data["license"], "N/A")
-
-    embed = Embed(title=f"Access: {modelname}", color=0x2ecc71)
-    embed.add_field(name="FILE NAME", value=f"```{modelname}```", inline=False)
-    embed.add_field(name="VERSION", value=f"```{data.get('version', 'N/A')}```", inline=True)
-    embed.add_field(name="SIZE", value=f"```{data.get('size', 'N/A')}```", inline=True)
-    embed.add_field(name="LICENSE", value=f"```{data['license']}```", inline=True)
-    embed.add_field(name="DETAILS", value=f"```{desc}```", inline=False)
-    embed.add_field(name="PASSWORD", value=f"```{data['password']}```", inline=False)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="code", description="Generate unique code (ROOT only)")
+# 5. ADMIN TOOLS
+@bot.tree.command(name="spread", description="Announce message")
 @app_commands.checks.has_role("ROOT")
-async def code_command(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    new_code = generate_code()
-    
-    # Simple file append
-    with open("generated_codes.txt", "a") as f:
-        f.write(f"{new_code}\n")
-        
-    await interaction.followup.send(f"✅ Generated Code: `{new_code}`")
-
-@bot.tree.command(name="paid_id", description="Customer info lookup (ROOT only)")
-@app_commands.describe(code="Customer Code")
-@app_commands.autocomplete(code=code_autocomplete)
-@app_commands.checks.has_role("ROOT")
-async def paid_id_command(interaction: discord.Interaction, code: str):
-    if code not in paid_id_data:
-        await interaction.response.send_message("❌ Code not found.", ephemeral=True)
-        return
-
-    data = paid_id_data[code]
-    embed = Embed(title=f"Customer: {code}", color=0x3498db)
-    for key, val in data.items():
-        embed.add_field(name=key.upper(), value=f"```{val}```", inline=False)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="proinfo", description="Get info about paid files (LEGIT only)")
-@app_commands.autocomplete(fid=fid_autocomplete)
-@app_commands.checks.has_role("LEGIT")
-async def proinfo_command(interaction: discord.Interaction, fid: str):
-    if fid not in pro_file_info:
-        await interaction.response.send_message("❌ File ID not found.", ephemeral=True)
-        return
-
-    data = pro_file_info[fid]
-    await interaction.response.defer(ephemeral=False)
-    
-    # Send parts sequentially
-    for key in ['FIRST', 'SEC', 'THIRD', 'FOUR']:
-        if data.get(key):
-            await interaction.followup.send(data[key])
-
-@bot.tree.command(name="spread", description="Announce message to channel")
-@app_commands.checks.has_role("ROOT")
-async def spread(interaction: discord.Interaction, channel_id: str, message: str):
+async def spread(inter: discord.Interaction, channel_id: str, message: str):
     try:
-        channel = bot.get_channel(int(channel_id))
-        if channel:
-            await channel.send(message)
-            await interaction.response.send_message(f"✅ Sent to {channel.mention}", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Invalid Channel ID", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"⚠️ Error: {e}", ephemeral=True)
+        await (bot.get_channel(int(channel_id))).send(message)
+        await inter.response.send_message("✅ Sent.", ephemeral=True)
+    except: await inter.response.send_message("❌ Failed.", ephemeral=True)
 
-@bot.tree.command(name="epicembed", description="Send custom embed")
+@bot.tree.command(name="epicembed", description="Custom Embed")
 @app_commands.checks.has_role("ROOT")
-async def epicembed(interaction: discord.Interaction, channel_id: str, description: str, title: str = None, color: str = "#3498db"):
+async def epicembed(inter: discord.Interaction, channel_id: str, description: str, title: str=None, color: str="#3498db"):
     try:
-        channel = bot.get_channel(int(channel_id))
-        col_val = int(color.lstrip("#"), 16)
-        embed = Embed(title=title, description=description, color=col_val)
-        await channel.send(embed=embed)
-        await interaction.response.send_message("✅ Embed Sent!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"⚠️ Error: {e}", ephemeral=True)
+        embed = Embed(title=title, description=description, color=int(color.lstrip("#"), 16))
+        await (bot.get_channel(int(channel_id))).send(embed=embed)
+        await inter.response.send_message("✅ Sent.", ephemeral=True)
+    except: await inter.response.send_message("❌ Failed.", ephemeral=True)
 
-@bot.tree.command(name="paymentxx", description="Confirm purchase")
+@bot.tree.command(name="paymentxx", description="Confirm Order")
 @app_commands.checks.has_role("ROOT")
-async def paymentxx(interaction: discord.Interaction, channelid: str, userid: str, spawncode: str):
+async def paymentxx(inter: discord.Interaction, channelid: str, userid: str, spawncode: str):
     try:
-        channel = await bot.fetch_channel(int(channelid))
-        user = await bot.fetch_user(int(userid))
-        
-        msg = (f"{user.mention}\nThanks for your purchase!\n"
-               f"If you need support, mention spawn code `{spawncode}` in <#1240335393686290514>.\n"
-               f"— NOTTHEREALEPIC Team")
-        
-        await channel.send(msg)
-        try:
-            await user.send(f"✅ **Purchase Confirmed!**\n\n{msg}")
-        except:
-            pass
-        await interaction.response.send_message("✅ Confirmation sent.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+        u = await bot.fetch_user(int(userid))
+        msg = f"{u.mention}\nPurchase Confirmed! Mention `{spawncode}` for support."
+        await (bot.get_channel(int(channelid))).send(msg)
+        try: await u.send(f"✅ **Confirmed!**\n{msg}")
+        except: pass
+        await inter.response.send_message("✅ Done.", ephemeral=True)
+    except Exception as e: await inter.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
-@bot.tree.command(name="warntt", description="Ticket inactivity warning")
+@bot.tree.command(name="warntt", description="Inactive Warning")
 @app_commands.checks.has_role("ROOT")
-async def warntt(interaction: discord.Interaction, channelid: str, userid: str):
+async def warntt(inter: discord.Interaction, channelid: str, userid: str):
     try:
-        channel = await bot.fetch_channel(int(channelid))
-        user = await bot.fetch_user(int(userid))
-        
-        msg = (f"## Ticket Inactivity Warning\nHey {user.mention}, this ticket will close in 3 hours if no response.\n"
-               "— NOTTHEREALEPIC Team")
-        
-        await channel.send(msg)
-        try:
-            await user.send(msg)
-        except:
-            pass
-        await interaction.response.send_message("✅ Warning sent.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+        u = await bot.fetch_user(int(userid))
+        msg = f"## ⚠️ Inactivity Warning\n{u.mention}, this ticket will close in 3 hours."
+        await (bot.get_channel(int(channelid))).send(msg)
+        try: await u.send(msg)
+        except: pass
+        await inter.response.send_message("✅ Done.", ephemeral=True)
+    except: await inter.response.send_message("❌ Failed.", ephemeral=True)
 
-@bot.tree.command(name="dm", description="DM a user by ID")
-@app_commands.check(is_admin_or_mod)
-async def dm(interaction: discord.Interaction, userid: str, message: str):
+@bot.tree.command(name="dm", description="Direct Message User")
+@app_commands.checks.has_any_role("ROOT", "MOD")
+async def dm(inter: discord.Interaction, userid: str, message: str):
     try:
-        user = await bot.fetch_user(int(userid))
-        await user.send(message.replace("\\n", "\n"))
-        await interaction.response.send_message(f"✅ DM sent to {user.name}", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Failed: {e}", ephemeral=True)
+        await (await bot.fetch_user(int(userid))).send(message.replace("\\n", "\n"))
+        await inter.response.send_message("✅ Sent.", ephemeral=True)
+    except: await inter.response.send_message("❌ Failed (DMs off?)", ephemeral=True)
 
-# ----------- EVENTS & TASKS -----------
-
+# ----------- EVENTS -----------
 @bot.event
 async def on_ready():
-    logging.info(f"✅ {bot.user} is ONLINE.")
+    print(f"✅ MAIN BOT ONLINE: {bot.user}")
+    # Sync Commands
+    await bot.tree.sync(guild=discord.Object(id=1232208366735196283))
+    
+    # Start Tasks
+    change_status.start()
+    spam_cleanup.start()
+    
+    # Reaction Role Refresh
     try:
-        # Syncing globally or to specific guild (Uncomment guild for faster testing)
-        await bot.tree.sync(guild=discord.Object(id=1232208366735196283))
-        logging.info("✅ Commands Synced.")
-    except Exception as e:
-        logging.error(f"Sync Error: {e}")
+        c = bot.get_channel(LEGIT_CHANNEL_ID)
+        m = await c.fetch_message(LEGIT_MSG_ID)
+        if not any(str(r) == "✅" and r.me for r in m.reactions):
+            await m.add_reaction("✅")
+    except: pass
 
-    # Start loops
-    if not change_status.is_running(): change_status.start()
-    if not update_uptime_embed.is_running(): update_uptime_embed.start()
-    if not spam_cleanup.is_running(): spam_cleanup.start()
-
-    # Reaction Role Setup
-    channel = bot.get_channel(LEGIT_REACTION_CHANNEL_ID)
-    if channel:
-        try:
-            msg = await channel.fetch_message(LEGIT_REACTION_MESSAGE_ID)
-            embed = Embed(
-                title="🎯 Get Verified Access",
-                description=f"React with {LEGIT_REACTION_EMOJI} to get the **Legit** role.",
-                color=discord.Color.red()
-            )
-            embed.set_image(url=LEGIT_REACTION_GIF)
-            embed.set_footer(text="Auto-Verification")
-            await msg.edit(embed=embed)
-            await msg.add_reaction(LEGIT_REACTION_EMOJI)
-        except Exception:
-            logging.warning("⚠️ Could not refresh reaction role message.")
-
-@tasks.loop(seconds=60)
+@tasks.loop(minutes=5)
 async def change_status():
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name=random.choice(statuses)))
-
-@tasks.loop(seconds=50)
-async def update_uptime_embed():
-    try:
-        channel = bot.get_channel(UPTIME_CHANNEL_ID)
-        if not channel: return
-        msg = await channel.fetch_message(UPTIME_MSG_ID)
-        
-        now = datetime.now(timezone.utc)
-        ist_now = now + timedelta(hours=5, minutes=30)
-        uptime = now - start_time
-        
-        embed = Embed(title="NOTTHEREALEPIC BOT", color=discord.Color.green())
-        embed.add_field(name="STATUS", value="```ONLINE```", inline=True)
-        embed.add_field(name="LAST UPDATED", value=f"```{ist_now.strftime('%H:%M:%S')} IST```", inline=True)
-        embed.set_footer(text="Auto-updated every 50s")
-        
-        await msg.edit(embed=embed)
-    except Exception:
-        pass
+    st = random.choice([
+        "Playing GTA 6 — don't ask.", "Modding GTA like it's a career.",
+        "ZModeler: cracked, patched, broken.", "Helping, but not politely.",
+        "Banning you next, probably.", "Discord mod — not your therapist.",
+        "Fixing what Rockstar couldn’t."
+    ])
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name=st))
 
 @tasks.loop(minutes=30)
 async def spam_cleanup():
-    """UPGRADE: Cleans up old spam tracking data to save memory."""
+    """Cleans up old spam tracking data."""
     user_message_tracker.clear()
 
 @bot.event
-async def on_message(message):
-    if message.author.bot: return
-
-    # Spam & Bad Word Filter
-    content = normalize_text(message.content)
-    uid = message.author.id
-    
-    # 1. Check Bad Words
-    if any(w in content for w in bad_words):
-        try:
-            await message.delete()
-            await message.author.timeout(timedelta(hours=12), reason="Scam/NSFW")
-            await message.channel.send(f"⚠️ {message.author.mention} flagged for suspicious content.", delete_after=5)
-        except: pass
-        return
-
-    # 2. Check Spam (5 servers in 10 mins)
-    now = datetime.now(timezone.utc)
-    user_message_tracker[uid].append((content, now, message.guild.id))
-    
-    # Filter old messages
-    user_message_tracker[uid] = [(m, t, g) for m, t, g in user_message_tracker[uid] 
-                                 if (now - t).total_seconds() < 600]
-    
-    unique_guilds = {g for m, t, g in user_message_tracker[uid] if m == content}
-    
-    if len(unique_guilds) >= 5:
-        try:
-            await message.author.timeout(timedelta(hours=24), reason="Multi-server Spam")
-            await message.delete()
-        except: pass
-        return
-
-    await bot.process_commands(message)
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.message_id == LEGIT_REACTION_MESSAGE_ID and str(payload.emoji) == LEGIT_REACTION_EMOJI:
-        guild = bot.get_guild(payload.guild_id)
-        if not guild: return
-        
-        member = guild.get_member(payload.user_id)
-        role = guild.get_role(LEGIT_REACTION_ROLE_ID)
-        
-        if member and role and not member.bot:
-            await member.add_roles(role)
-            # Remove reaction
-            msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
-            await msg.remove_reaction(payload.emoji, member)
+async def on_raw_reaction_add(p):
+    if p.message_id == LEGIT_MSG_ID and str(p.emoji) == "✅":
+        g = bot.get_guild(p.guild_id)
+        m = g.get_member(p.user_id)
+        if m and not m.bot:
+            await m.add_roles(g.get_role(LEGIT_ROLE_ID))
             try:
-                await member.send(f"✅ Verified! You now have the **{role.name}** role.")
+                # Clean up reaction & DM user
+                await (await bot.get_channel(p.channel_id).fetch_message(p.message_id)).remove_reaction(p.emoji, m)
+                await m.send("✅ You are now Verified!")
             except: pass
 
 @bot.event
 async def on_member_join(member):
     user_activity[member.id] = {"joined": datetime.now(timezone.utc), "got_role": False}
-    try:
-        await member.send("Welcome! Please read rules and verify.")
+    try: await member.send("Thank you for joining the server! Please verify.")
     except: pass
 
 @bot.event
 async def on_member_update(before, after):
+    # Track when they get the LEGIT role
     if after.id in user_activity:
-        if any(r.id == LEGIT_REACTION_ROLE_ID for r in after.roles) and not any(r.id == LEGIT_REACTION_ROLE_ID for r in before.roles):
+        if any(r.id == LEGIT_ROLE_ID for r in after.roles) and not any(r.id == LEGIT_ROLE_ID for r in before.roles):
             user_activity[after.id]["got_role"] = True
 
 @bot.event
 async def on_member_remove(member):
-    # Hit and Run Ban Logic
+    # Hit and Run Logic
     if member.id in user_activity:
         data = user_activity[member.id]
         if data["got_role"]:
@@ -383,25 +284,43 @@ async def on_member_remove(member):
             time_spent_mins = (datetime.now(timezone.utc) - joined_at).total_seconds() / 60
             
             if time_spent_mins < TIME_LIMIT_MINUTES:
-                logging.info(f"🚨 Hit-and-Run Detected: {member.name}")
+                print(f"🚨 Hit-and-Run: {member.name}")
                 try:
                     await member.guild.ban(member, reason="Hit and Run (Verified & Left quickly)")
-                    # Try to DM them
                     await member.send("You were banned for 'Hit and Run' (Joining, grabbing files, and leaving immediately).")
                 except: pass
         del user_activity[member.id]
 
 @bot.event
-async def on_app_command_error(interaction, error):
-    if isinstance(error, app_commands.CommandOnCooldown):
-        await interaction.response.send_message(f"⏳ Cool down! Wait {error.retry_after:.1f}s", ephemeral=True)
-    elif isinstance(error, app_commands.MissingRole):
-        await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
-    else:
-        logging.error(f"Command Error: {error}")
+async def on_message(msg):
+    if msg.author.bot: return
+    
+    # 1. Bad Word Filter
+    if any(w in msg.content.lower() for w in bad_words):
+        try: 
+            await msg.delete()
+            await msg.author.timeout(timedelta(hours=12), reason="Scam/NSFW")
+        except: pass
+        return
+
+    # 2. Multi-Server Spam Check
+    uid = msg.author.id
+    now = datetime.now(timezone.utc)
+    content = normalize_text(msg.content)
+    
+    user_message_tracker[uid].append((content, now, msg.guild.id))
+    # Filter old
+    user_message_tracker[uid] = [(m, t, g) for m, t, g in user_message_tracker[uid] if (now - t).total_seconds() < 600]
+    
+    unique_guilds = {g for m, t, g in user_message_tracker[uid] if m == content}
+    if len(unique_guilds) >= 5:
+        try:
+            await msg.author.timeout(timedelta(hours=24), reason="Multi-server Spam")
+            await msg.delete()
+        except: pass
+        return
+
+    await bot.process_commands(msg)
 
 if __name__ == "__main__":
-    if not TOKEN:
-        logging.critical("❌ TOKEN NOT FOUND")
-    else:
-        bot.run(TOKEN)
+    if TOKEN: bot.run(TOKEN)
