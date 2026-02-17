@@ -57,13 +57,9 @@ def run_flask():
 
 # ----------- MONITOR LOGIC ----------- #
 RENDER_BOTS = {
-    "3 IN ONE": "https://dc-all-bot.onrender.com",
+    "3 IN ONE": "https://dc-all-bot-1.onrender.com",
     "NRE UPLOADER": "https://nre-uploader-bot.onrender.com",
     "NRE Mods Site": "https://nremods.onrender.com/",
-    "CoupleWalls": "https://couplewalls.onrender.com",    
-    "Divine Bot": "https://divine-bot-2vp1.onrender.com/",
-    "EpicFlacMusic": "https://epicflacmusic.onrender.com/",
-    "Pin Fetch": "https://autocad-education.onrender.com/",
 }
 bot_statuses = {name: "🔄 INIT" for name in RENDER_BOTS}
 
