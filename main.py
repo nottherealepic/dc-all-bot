@@ -8,7 +8,7 @@ import os
 # pinger.py MUST run first because it hosts the Web Server
 BOTS = [
     {"file": "pinger.py", "delay": 0},      # Starts immediately to bind Port 8080
-    {"file": "nottherealepic.py", "delay": 30}, # Waits 30s to avoid Discord Rate Limit
+    # {"file": "nottherealepic.py", "delay": 30}, # Waits 30s to avoid Discord Rate Limit
 ]
 
 processes = []
